@@ -162,6 +162,12 @@ do_trap(int trapnr, int signr, char *str, struct pt_regs *regs,
 {
 	struct task_struct *tsk = current;
 
+	// if has efficient signal handler registered
+	if (tsk->thread.esig_flag & (1 << trapnr)) {
+		set_thread_flag(TIF_ESIGNAL);
+		return;
+	}
+
 	if (!do_trap_no_signal(tsk, trapnr, str, regs, error_code))
 		return;
 
@@ -178,7 +184,11 @@ static void do_error_trap(struct pt_regs *regs, long error_code, char *str,
 	unsigned long trapnr, int signr, int sicode, void __user *addr)
 {
 	RCU_LOCKDEP_WARN(!rcu_is_watching(), "entry code didn't wake RCU");
-
+	// if has efficient signal handler registered
+	if (current->thread.esig_flag & (1 << trapnr)) {
+		set_thread_flag(TIF_ESIGNAL);
+		return;
+	}
 	if (notify_die(DIE_TRAP, str, regs, error_code, trapnr, signr) !=
 			NOTIFY_STOP) {
 		cond_local_irq_enable(regs);
@@ -802,7 +812,9 @@ static bool do_int3(struct pt_regs *regs)
 		return true;
 #endif
 	res = notify_die(DIE_INT3, "int3", regs, 0, X86_TRAP_BP, SIGTRAP);
-
+  // this notify_die() goes throught the list of notifier functions
+  // such as kernel debuggers, kprobes, or other monitoring tools.
+  // it has nothing to do with userspace debugger.
 	return res == NOTIFY_STOP;
 }
 NOKPROBE_SYMBOL(do_int3);

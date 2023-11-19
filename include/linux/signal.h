@@ -10,7 +10,13 @@ struct task_struct;
 
 /* for sysctl */
 extern int print_fatal_signals;
-
+struct esignal
+{
+  // handler table
+  void *handler_table[100];
+  // signal stack address
+  void *esignal_stack;
+};
 static inline void copy_siginfo(kernel_siginfo_t *to,
 				const kernel_siginfo_t *from)
 {

@@ -144,6 +144,33 @@ void noinstr exit_to_user_mode(void)
 /* Workaround to allow gradual conversion of architecture code */
 void __weak arch_do_signal_or_restart(struct pt_regs *regs) { }
 
+int esignal_redirect(struct pt_regs *regs) {
+  void __user *user_stack_pointer;
+  clear_thread_flag(TIF_ESIGNAL);
+  unsigned long copynr;
+  int trap_nr;
+
+  // get rip and rsp
+  user_stack_pointer = current->thread.esignal->esignal_stack;
+  // skip red zone
+  //user_stack_pointer -= 128;
+
+  // pushing original rsp and rip
+  user_stack_pointer -= sizeof(unsigned long);
+  copynr = copy_to_user(user_stack_pointer, &regs->ip, sizeof(unsigned long));
+  if (copynr != sizeof(unsigned long)) return -1;
+
+  user_stack_pointer -= sizeof(unsigned long);
+  copynr = copy_to_user(user_stack_pointer, &regs->sp, sizeof(unsigned long));
+  if (copynr != sizeof(unsigned long)) return -1;
+
+  // overwrite rsp and rip
+  trap_nr = current->thread.trap_nr;
+  regs->sp = (unsigned long)current->thread.esignal->esignal_stack;
+  regs->ip = (unsigned long)current->thread.esignal->handler_table[trap_nr];
+  return 0;
+}
+
 static unsigned long exit_to_user_mode_loop(struct pt_regs *regs,
 					    unsigned long ti_work)
 {
@@ -154,6 +181,9 @@ static unsigned long exit_to_user_mode_loop(struct pt_regs *regs,
 	while (ti_work & EXIT_TO_USER_MODE_WORK) {
 
 		local_irq_enable_exit_to_user(ti_work);
+
+		if (ti_work & _TIF_ESIGNAL)
+			esignal_redirect(regs);
 
 		if (ti_work & _TIF_NEED_RESCHED)
 			schedule();

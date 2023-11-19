@@ -4249,6 +4249,44 @@ do_sigaltstack (const stack_t *ss, stack_t *oss, unsigned long sp,
 	return ret;
 }
 
+/* Efficient signal register - temporarily placed here*/
+SYSCALL_DEFINE3(esignal_register, void __user *, uhandler_addr, void __user *,
+                ustack_addr, int, trapnr)
+{
+	if (!access_ok(uhandler_addr, sizeof(void *)))
+		return -EFAULT;
+
+	struct esignal *thread_esig;
+	thread_esig = kmalloc(sizeof(struct esignal), GFP_KERNEL);
+	if (!thread_esig)
+		return -ENOMEM;
+
+	// store the uhandler address in thread_struct, mark the flag
+	current->thread.esig_flag |= 1 << trapnr;
+	current->thread.esignal = thread_esig;
+	current->thread.esignal->handler_table[trapnr] = uhandler_addr;
+	current->thread.esignal->esignal_stack = ustack_addr;
+
+	return 0;
+}
+
+SYSCALL_DEFINE0(sig_back)
+{
+	struct kernel_siginfo info;
+	int ret = 0;
+
+    // Prepare the siginfo structure
+	memset(&info, 0, sizeof(struct kernel_siginfo));
+	info.si_signo = SIGTRAP;
+	info.si_code = SI_KERNEL; // Or use SI_USER if you want to pretend it's from the user
+	info.si_pid = current->pid;
+	info.si_uid = from_kuid_munged(current_user_ns(), current_uid());
+
+	ret = send_sig_info(SIGTRAP, &info, current);
+
+	return ret;
+}
+
 SYSCALL_DEFINE2(sigaltstack,const stack_t __user *,uss, stack_t __user *,uoss)
 {
 	stack_t new, old;

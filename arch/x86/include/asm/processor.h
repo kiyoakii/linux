@@ -449,6 +449,10 @@ struct thread_struct {
 	unsigned long		cr2;
 	unsigned long		trap_nr;
 	unsigned long		error_code;
+	/* Efficient signal info: */
+	struct esignal		*esignal;
+	unsigned long		esig_flag;
+
 #ifdef CONFIG_VM86
 	/* Virtual 86 mode info */
 	struct vm86		*vm86;

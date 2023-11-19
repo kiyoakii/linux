@@ -953,6 +953,8 @@ asmlinkage long sys_set_mempolicy_home_node(unsigned long start, unsigned long l
 asmlinkage long sys_cachestat(unsigned int fd,
 		struct cachestat_range __user *cstat_range,
 		struct cachestat __user *cstat, unsigned int flags);
+asmlinkage long sys_esignal_register(void __user *uhandler_addr, void __user *ustack_addr, int trapnr);
+asmlinkage long sys_sig_back();
 
 /*
  * Architecture-specific system calls

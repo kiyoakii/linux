@@ -1751,6 +1751,7 @@ extern struct pid *cad_pid;
 #define PF__HOLE__20000000	0x20000000
 #define PF__HOLE__40000000	0x40000000
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
+#define PF_ESIGNAL        0x100000000      /* This thread has a efficient userspace handler set up */
 
 /*
  * Only the _current_ task can read/write to tsk->flags, but other
