@@ -46,6 +46,7 @@
 #include <linux/cgroup.h>
 #include <linux/audit.h>
 #include <linux/sysctl.h>
+#include <asm/trapnr.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -4272,19 +4273,11 @@ SYSCALL_DEFINE3(esignal_register, void __user *, uhandler_addr, void __user *,
 
 SYSCALL_DEFINE0(sig_back)
 {
-	struct kernel_siginfo info;
-	int ret = 0;
+	struct pt_regs *esig_regs = current_pt_regs();
+	if (current->thread.esignal->handler_table[X86_TRAP_BP])
+		esignal_redirect(esig_regs);
 
-    // Prepare the siginfo structure
-	memset(&info, 0, sizeof(struct kernel_siginfo));
-	info.si_signo = SIGTRAP;
-	info.si_code = SI_KERNEL; // Or use SI_USER if you want to pretend it's from the user
-	info.si_pid = current->pid;
-	info.si_uid = from_kuid_munged(current_user_ns(), current_uid());
-
-	ret = send_sig_info(SIGTRAP, &info, current);
-
-	return ret;
+	return 0;
 }
 
 SYSCALL_DEFINE2(sigaltstack,const stack_t __user *,uss, stack_t __user *,uoss)

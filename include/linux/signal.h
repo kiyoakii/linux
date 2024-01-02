@@ -17,6 +17,9 @@ struct esignal
   // signal stack address
   void *esignal_stack;
 };
+
+int esignal_redirect(struct pt_regs *regs);
+
 static inline void copy_siginfo(kernel_siginfo_t *to,
 				const kernel_siginfo_t *from)
 {

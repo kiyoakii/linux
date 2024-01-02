@@ -51,6 +51,9 @@ static long syscall_trace_enter(struct pt_regs *regs, long syscall,
 	long ret = 0;
 
 	/*
+	 * Handle Efficient Signal. This 
+	*/
+	/*
 	 * Handle Syscall User Dispatch.  This must comes first, since
 	 * the ABI here can be something that doesn't make sense for
 	 * other syscall_work features.

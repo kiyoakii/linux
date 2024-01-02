@@ -160,6 +160,7 @@ static void
 do_trap(int trapnr, int signr, char *str, struct pt_regs *regs,
 	long error_code, int sicode, void __user *addr)
 {
+	// sicode is 0 for INT3
 	struct task_struct *tsk = current;
 
 	// if has efficient signal handler registered
