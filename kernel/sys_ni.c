@@ -336,6 +336,7 @@ COND_SYSCALL(clock_adjtime32);
 
 COND_SYSCALL(esignal_register);
 COND_SYSCALL(sig_back);
+COND_SYSCALL(esignal_wait);
 
 /*
  * The syscalls below are not found in include/uapi/asm-generic/unistd.h

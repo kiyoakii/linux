@@ -826,8 +826,11 @@ __SYSCALL(__NR_esignal_register, sys_esignal_register)
 #define __NR_sig_back 453
 __SYSCALL(__NR_sig_back, sys_sig_back)
 
+#define __NR_esignal_wait 454
+__SYSCALL(__NR_esignal_wait, sys_esignal_wait)
+
 #undef __NR_syscalls
-#define __NR_syscalls 454
+#define __NR_syscalls 455
 
 /*
  * 32 bit systems traditionally used different

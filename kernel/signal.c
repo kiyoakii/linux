@@ -11,6 +11,11 @@
  *		to allow signals to be sent reliably.
  */
 
+#include "linux/completion.h"
+#include "linux/kern_levels.h"
+#include "linux/rcupdate.h"
+#include "linux/sched.h"
+#include "linux/thread_info.h"
 #include <linux/slab.h>
 #include <linux/export.h>
 #include <linux/init.h>
@@ -4251,23 +4256,58 @@ do_sigaltstack (const stack_t *ss, stack_t *oss, unsigned long sp,
 }
 
 /* Efficient signal register - temporarily placed here*/
-SYSCALL_DEFINE3(esignal_register, void __user *, uhandler_addr, void __user *,
-                ustack_addr, int, trapnr)
+SYSCALL_DEFINE4(esignal_register, void __user *, uhandler_addr, void __user *,
+                ustack_addr, int, trapnr, unsigned int, esignal_flags)
 {
 	if (!access_ok(uhandler_addr, sizeof(void *)))
 		return -EFAULT;
 
 	struct esignal *thread_esig;
+	struct task_struct *parent;
+	struct completion *parent_ready;
 	thread_esig = kmalloc(sizeof(struct esignal), GFP_KERNEL);
 	if (!thread_esig)
 		return -ENOMEM;
-
+	
 	// store the uhandler address in thread_struct, mark the flag
 	current->thread.esig_flag |= 1 << trapnr;
+	// mark that it can intercept tracee's syscall
+	current->thread.esig_flag |= 1 << 31;
 	current->thread.esignal = thread_esig;
 	current->thread.esignal->handler_table[trapnr] = uhandler_addr;
 	current->thread.esignal->esignal_stack = ustack_addr;
+	current->thread.esignal->syscall_nr = -1;
+	printk(KERN_INFO "esignal_register: registered the handler\n");
 
+	if (esignal_flags & 0x1) {
+		// flag == ESIG_TRACEME
+		set_syscall_work(ESIGNAL_TRACED);
+		
+		// copy the completion variable from the parent (rcu read lock)
+		rcu_read_lock(); // Use RCU read lock to safely access the current process's parent
+		printk(KERN_EMERG "esignal_register: got the rcu read lock\n");
+    	parent = rcu_dereference(current->real_parent);
+		if (parent != NULL && parent != current) {
+			printk(KERN_EMERG "get the parent task pointer\n");
+			if (parent->thread.esignal == NULL) {
+				printk(KERN_EMERG "parent's esignal is NULL\n");
+				return -1;
+			}
+			current->thread.esignal->completion = parent->thread.esignal->completion;
+			printk(KERN_EMERG "passing the completion variable from parent to child\n");
+		}
+		rcu_read_unlock();
+		printk(KERN_EMERG "esignal_register: released the rcu read lock\n");
+		wait_for_completion(current->thread.esignal->completion);
+	} else {
+		// allocate a new completion variable
+		parent_ready = kmalloc(sizeof(struct completion), GFP_KERNEL);
+		if (!parent_ready)
+			return -ENOMEM;
+		init_completion(parent_ready);
+		current->thread.esignal->completion = parent_ready;
+	}
+	
 	return 0;
 }
 
@@ -4276,6 +4316,25 @@ SYSCALL_DEFINE0(sig_back)
 	struct pt_regs *esig_regs = current_pt_regs();
 	if (current->thread.esignal->handler_table[X86_TRAP_BP])
 		esignal_redirect(esig_regs);
+
+	return 0;
+}
+
+SYSCALL_DEFINE0(esignal_wait)
+{
+	// set current task to sleep only if the child is running
+	set_current_state(TASK_INTERRUPTIBLE);
+	// printk(KERN_EMERG "set the parent state as %d\n", current->__state);
+
+	// set the esignal completion variable
+	complete(current->thread.esignal->completion);
+
+	// call scheduler
+	printk(KERN_EMERG "esignal_wait: going to sleep\n");
+	schedule();
+
+	set_current_state(TASK_RUNNING);
+	printk(KERN_EMERG "esignal_wait: woken up\n");
 
 	return 0;
 }

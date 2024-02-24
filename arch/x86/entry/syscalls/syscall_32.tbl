@@ -458,3 +458,4 @@
 451	i386	cachestat		sys_cachestat
 452	i386	esignal_register		sys_esignal_register
 453	i386	sig_back		sys_sig_back
+454 i386    esignal_wait    sys_esignal_wait

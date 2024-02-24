@@ -2,6 +2,7 @@
 #ifndef _LINUX_SIGNAL_H
 #define _LINUX_SIGNAL_H
 
+#include "linux/completion.h"
 #include <linux/bug.h>
 #include <linux/signal_types.h>
 #include <linux/string.h>
@@ -16,6 +17,10 @@ struct esignal
   void *handler_table[100];
   // signal stack address
   void *esignal_stack;
+  // syscall number (for syscall tracing)
+  int syscall_nr;
+  // a completion variable
+  struct completion *completion;
 };
 
 int esignal_redirect(struct pt_regs *regs);

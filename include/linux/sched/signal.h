@@ -398,6 +398,8 @@ static inline int signal_pending(struct task_struct *p)
 	 */
 	if (unlikely(test_tsk_thread_flag(p, TIF_NOTIFY_SIGNAL)))
 		return 1;
+	// if (unlikely(test_tsk_thread_flag(p, TIF_ESIGNAL)))
+	// 	return 1;
 	return task_sigpending(p);
 }
 

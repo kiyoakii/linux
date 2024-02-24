@@ -10,7 +10,11 @@
 #include <linux/audit.h>
 #include <linux/tick.h>
 
+#include "asm/thread_info.h"
 #include "common.h"
+#include "linux/completion.h"
+#include "linux/sched.h"
+#include "linux/thread_info.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
@@ -45,14 +49,71 @@ static inline void syscall_enter_audit(struct pt_regs *regs, long syscall)
 	}
 }
 
+int wakeup_tracer(void) {
+	struct task_struct *parent;
+    int retval = 0;
+
+    rcu_read_lock(); // Use RCU read lock to safely access the current process's parent
+    parent = rcu_dereference(current->real_parent);
+
+    if (parent == NULL) {
+        rcu_read_unlock();
+        return -ESRCH; // No parent found
+    }
+
+    // Ensure the parent process is not the same as the current process
+    if (parent == current) {
+        rcu_read_unlock();
+        return -EINVAL; // Invalid request
+    }
+
+    // Check if the parent is in a state that it can be woken up
+    if (parent->__state & TASK_NORMAL) {
+        // Wake up the parent process
+        if (wake_up_process(parent)) {
+			printk(KERN_EMERG "wakeup successfully\n");
+        	retval = 0; // Success
+		} else {
+			printk(KERN_EMERG "wakeup failed: parent is running\n");
+			retval = -EAGAIN; // Parent is not in a state that can be woken up
+		}
+    } else {
+		printk(KERN_EMERG "Parent is not in a state that can be woken up\n");
+        retval = -EAGAIN; // Parent is not in a state that can be woken up
+    }
+
+    rcu_read_unlock();
+	return retval;
+}
+
+bool esignal_to_tracer(struct pt_regs *regs)
+{
+	// wake up tracer that is waiting
+	if (wakeup_tracer()) 
+		return false;
+
+	// set current task to sleep
+	set_current_state(TASK_INTERRUPTIBLE);
+
+	printk(KERN_EMERG "child sleeping...\n");
+	// call scheduler
+	schedule();
+
+	return true;
+}
+
 static long syscall_trace_enter(struct pt_regs *regs, long syscall,
 				unsigned long work)
 {
 	long ret = 0;
 
 	/*
-	 * Handle Efficient Signal. This 
+	 * Handle Efficient Signal.
 	*/
+	if (work & SYSCALL_WORK_ESIGNAL_TRACED) {
+		if (esignal_to_tracer(regs))
+			return -1L;
+	}
 	/*
 	 * Handle Syscall User Dispatch.  This must comes first, since
 	 * the ABI here can be something that doesn't make sense for
@@ -148,30 +209,44 @@ void noinstr exit_to_user_mode(void)
 void __weak arch_do_signal_or_restart(struct pt_regs *regs) { }
 
 int esignal_redirect(struct pt_regs *regs) {
-  void __user *user_stack_pointer;
-  clear_thread_flag(TIF_ESIGNAL);
-  unsigned long copynr;
-  int trap_nr;
+	void __user *user_stack_pointer;
+	clear_thread_flag(TIF_ESIGNAL);
+	unsigned long copynr;
+	int trap_nr;
 
-  // get rip and rsp
-  user_stack_pointer = current->thread.esignal->esignal_stack;
-  // skip red zone
-  //user_stack_pointer -= 128;
+	// get rip and rsp
+	user_stack_pointer = current->thread.esignal->esignal_stack;
+	// skip red zone
+	//user_stack_pointer -= 128;
 
-  // pushing original rsp and rip
-  user_stack_pointer -= sizeof(unsigned long);
-  copynr = copy_to_user(user_stack_pointer, &regs->ip, sizeof(unsigned long));
-  if (copynr != sizeof(unsigned long)) return -1;
+	// pushing original rsp and rip
+	user_stack_pointer -= sizeof(unsigned long);
+	copynr = copy_to_user(user_stack_pointer, &regs->ip, sizeof(unsigned long));
+	if (copynr != sizeof(unsigned long)) return -1;
 
-  user_stack_pointer -= sizeof(unsigned long);
-  copynr = copy_to_user(user_stack_pointer, &regs->sp, sizeof(unsigned long));
-  if (copynr != sizeof(unsigned long)) return -1;
+	user_stack_pointer -= sizeof(unsigned long);
+	copynr = copy_to_user(user_stack_pointer, &regs->sp, sizeof(unsigned long));
+	if (copynr != sizeof(unsigned long)) return -1;
 
-  // overwrite rsp and rip
-  trap_nr = current->thread.trap_nr;
-  regs->sp = (unsigned long)current->thread.esignal->esignal_stack;
-  regs->ip = (unsigned long)current->thread.esignal->handler_table[trap_nr];
-  return 0;
+	if ((current->thread.esig_flag & 31) && (current->thread.esignal->syscall_nr != -1)) {
+		trap_nr = 3; // INT3
+		// push argnum: 1
+		unsigned long argnum = 1;
+		user_stack_pointer -= sizeof(unsigned long);
+		copynr = copy_to_user(user_stack_pointer, &argnum, sizeof(unsigned long));
+		if (copynr != sizeof(unsigned long)) return -1;
+
+		// push syscall number
+		user_stack_pointer -= sizeof(unsigned int);
+		copynr = copy_to_user(user_stack_pointer, &current->thread.esignal->syscall_nr, sizeof(unsigned int));
+		if (copynr != sizeof(unsigned int)) return -1;
+	} else {
+		trap_nr = current->thread.trap_nr;
+	}
+	// overwrite rsp and rip
+	regs->sp = (unsigned long)current->thread.esignal->esignal_stack;
+	regs->ip = (unsigned long)current->thread.esignal->handler_table[trap_nr];
+	return 0;
 }
 
 static unsigned long exit_to_user_mode_loop(struct pt_regs *regs,

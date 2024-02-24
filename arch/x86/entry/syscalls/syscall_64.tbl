@@ -375,6 +375,7 @@
 451	common	cachestat		sys_cachestat
 452	common	esignal_register		sys_esignal_register
 453	common	sig_back		sys_sig_back
+454 common  esignal_wait    sys_esignal_wait
 
 #
 # Due to a historical design error, certain syscalls are numbered differently
