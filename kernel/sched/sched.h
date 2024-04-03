@@ -74,6 +74,8 @@
 
 #include "../workqueue_internal.h"
 
+#include <linux/sched/cputime.h>
+
 #ifdef CONFIG_CGROUP_SCHED
 #include <linux/cgroup.h>
 #include <linux/psi.h>

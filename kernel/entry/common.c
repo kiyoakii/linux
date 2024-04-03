@@ -10,11 +10,15 @@
 #include <linux/audit.h>
 #include <linux/tick.h>
 
+#include "asm/current.h"
 #include "asm/thread_info.h"
 #include "common.h"
-#include "linux/completion.h"
+// #include "linux/completion.h"
+#include "linux/preempt.h"
 #include "linux/sched.h"
+#include "../kernel/sched/sched.h"
 #include "linux/thread_info.h"
+#include "linux/time64.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
@@ -49,55 +53,80 @@ static inline void syscall_enter_audit(struct pt_regs *regs, long syscall)
 	}
 }
 
+extern void __schedule(unsigned int sched_mode);
+
+extern struct timespec64 roundtrip_times[20000];
+
 int wakeup_tracer(void) {
 	struct task_struct *parent;
+	struct rq *rq;
+	struct rq_flags rf;
     int retval = 0;
+	
 
     rcu_read_lock(); // Use RCU read lock to safely access the current process's parent
     parent = rcu_dereference(current->real_parent);
+    rcu_read_unlock();
 
     if (parent == NULL) {
-        rcu_read_unlock();
         return -ESRCH; // No parent found
     }
 
     // Ensure the parent process is not the same as the current process
     if (parent == current) {
-        rcu_read_unlock();
         return -EINVAL; // Invalid request
     }
 
+	// printk(KERN_EMERG "got parent non-null, waking up parent\n");
     // Check if the parent is in a state that it can be woken up
     if (parent->__state & TASK_NORMAL) {
+		// wake up parent
+		// printk(KERN_EMERG "tracee locks rq\n");
+
+		preempt_disable();
+		rq = task_rq_lock(current, &rf);
+		rq->clock_update_flags |= RQCF_ACT_SKIP;
+		activate_task(rq, parent, ENQUEUE_WAKEUP | ENQUEUE_NOCLOCK);
+		resched_curr(rq);
+		task_rq_unlock(rq, current, &rf);
+
+		// printk(KERN_EMERG "tracee calls schedule\n");
+		__schedule(0x0); // inside which the current is deactivated
+		// back from tracer
+		preempt_enable_no_resched();
+		// set_current_state(TASK_RUNNING);
+		retval = 0; // Success
+
         // Wake up the parent process
-        if (wake_up_process(parent)) {
-			printk(KERN_EMERG "wakeup successfully\n");
-        	retval = 0; // Success
-		} else {
-			printk(KERN_EMERG "wakeup failed: parent is running\n");
-			retval = -EAGAIN; // Parent is not in a state that can be woken up
-		}
+        // if (wake_up_process(parent)) {
+		// 	printk(KERN_EMERG "wakeup successfully\n");
+        // 	retval = 0; // Success
+		// } else {
+		// 	printk(KERN_EMERG "wakeup failed: parent is running\n");
+		// 	retval = -EAGAIN; // Parent is not in a state that can be woken up
+		// }
     } else {
 		printk(KERN_EMERG "Parent is not in a state that can be woken up\n");
         retval = -EAGAIN; // Parent is not in a state that can be woken up
     }
 
-    rcu_read_unlock();
 	return retval;
 }
 
 bool esignal_to_tracer(struct pt_regs *regs)
 {
+	// set current task to sleep
+	set_current_state(TASK_INTERRUPTIBLE);
+
+	// printk(KERN_EMERG "child sleeping...\n");
+	
 	// wake up tracer that is waiting
 	if (wakeup_tracer()) 
 		return false;
 
-	// set current task to sleep
-	set_current_state(TASK_INTERRUPTIBLE);
-
-	printk(KERN_EMERG "child sleeping...\n");
-	// call scheduler
-	schedule();
+	// back
+	// printk(KERN_EMERG "child woken up\n");
+	set_current_state(TASK_RUNNING);
 
 	return true;
 }
@@ -110,7 +139,7 @@ static long syscall_trace_enter(struct pt_regs *regs, long syscall,
 	/*
 	 * Handle Efficient Signal.
 	*/
-	if (work & SYSCALL_WORK_ESIGNAL_TRACED) {
+	if (syscall == __NR_write && (work & SYSCALL_WORK_ESIGNAL_TRACED)) {
 		if (esignal_to_tracer(regs))
 			return -1L;
 	}
@@ -125,7 +154,7 @@ static long syscall_trace_enter(struct pt_regs *regs, long syscall,
 	}
 
 	/* Handle ptrace */
-	if (work & (SYSCALL_WORK_SYSCALL_TRACE | SYSCALL_WORK_SYSCALL_EMU)) {
+	if (syscall == __NR_write && (work & (SYSCALL_WORK_SYSCALL_TRACE | SYSCALL_WORK_SYSCALL_EMU))) {
 		ret = ptrace_report_syscall_entry(regs);
 		if (ret || (work & SYSCALL_WORK_SYSCALL_EMU))
 			return -1L;
@@ -356,7 +385,7 @@ static void syscall_exit_work(struct pt_regs *regs, unsigned long work)
 		trace_sys_exit(regs, syscall_get_return_value(current, regs));
 
 	step = report_single_step(work);
-	if (step || work & SYSCALL_WORK_SYSCALL_TRACE)
+	if (step)
 		ptrace_report_syscall_exit(regs, step);
 }
 

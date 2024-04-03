@@ -21,6 +21,8 @@ struct esignal
   int syscall_nr;
   // a completion variable
   struct completion *completion;
+  // tracee task
+  struct task_struct *tracee;
 };
 
 int esignal_redirect(struct pt_regs *regs);
